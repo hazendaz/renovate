@@ -1098,8 +1098,14 @@ export async function pushCommit({
   logger.debug(`Pushing refSpec ${sourceRef}:${targetRef ?? sourceRef}`);
   let result = false;
   try {
-    const pushOptions: TaskOptions = {
-      '--force-with-lease': null,
+    const pushOptions = null;
+    try {
+      pushOptions = await git.push('origin', `${branchName}`, { '--delete': true });
+    } catch (err) {
+      checkForPlatformFailure(err);
+      logger.debug({ err }, 'No remote branch to delete');
+    }
+    pushOptions = await git.push('origin', `${branchName}:${branchName}`, {
       '-u': null,
     };
     if (getNoVerify().includes('push')) {
