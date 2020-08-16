@@ -1303,22 +1303,49 @@ export async function pushCommit({
   pushOptions,
 }: PushFilesConfig): Promise<boolean> {
   await syncGit();
-  logger.debug(`Pushing refSpec ${sourceRef}:${targetRef ?? sourceRef}`);
+  const refSpec = `${sourceRef}:${targetRef ?? sourceRef}`;
+  logger.debug(`Pushing refSpec ${refSpec}`);
   let result = false;
+
+  const deleteBeforePush = pushOptions?.includes(
+    'renovate:delete-before-push',
+  );
+  const filteredPushOptions = pushOptions?.filter(
+    (opt) => opt !== 'renovate:delete-before-push',
+  );
+
   try {
+    if (deleteBeforePush) {
+      // Delete remote branch first to avoid force push, then push normally.
+      // This is needed when the server blocks force push entirely (including --force-with-lease).
+      try {
+        await gitRetry(() =>
+          git.push('origin', targetRef ?? sourceRef, { '--delete': null }),
+        );
+        logger.debug(
+          `Deleted remote branch ${targetRef ?? sourceRef} before push`,
+        );
+      } catch (err) {
+        checkForPlatformFailure(err as Error);
+        logger.debug({ err }, 'No remote branch to delete');
+      }
+    }
+
     const gitOptions: TaskOptions = {
-      '--force-with-lease': null,
       '-u': null,
     };
+    if (!deleteBeforePush) {
+      gitOptions['--force-with-lease'] = null;
+    }
     if (getNoVerify().includes('push')) {
       gitOptions['--no-verify'] = null;
     }
-    if (pushOptions) {
-      gitOptions['--push-option'] = pushOptions;
+    if (filteredPushOptions?.length) {
+      gitOptions['--push-option'] = filteredPushOptions;
     }
 
     const pushRes = await gitRetry(() =>
-      git.push('origin', `${sourceRef}:${targetRef ?? sourceRef}`, gitOptions),
+      git.push('origin', refSpec, gitOptions),
     );
     delete pushRes.repo;
     logger.debug({ result: pushRes }, 'git push');
