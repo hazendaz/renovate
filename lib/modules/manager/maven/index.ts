@@ -12,7 +12,8 @@ export const defaultConfig = {
   managerFilePatterns: [
     '/(^|/|\\.)pom\\.xml$/',
     '/^(((\\.mvn)|(\\.m2))/)?settings\\.xml$/',
-    '/(^|/)\\.mvn/extensions\\.xml$/',
+    '/(^|/)extensions\\.xml$/',
+    '/(^|/)site\\.xml$/',
   ],
 };
 

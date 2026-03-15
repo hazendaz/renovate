@@ -6,6 +6,7 @@ import {
   extractExtensions,
   extractPackage,
   extractRegistries,
+  extractSite,
   resolveParents,
 } from './extract.ts';
 
@@ -542,6 +543,99 @@ describe('modules/manager/maven/extract', () => {
         ),
       ).toBeNull();
     });
+
+    it('returns null for extensions with an unsupported namespace', () => {
+      expect(
+        extractExtensions(
+          '<extensions xmlns="http://example.com/unknown/1.0.0"><extension><groupId>g</groupId><artifactId>a</artifactId><version>1.0</version></extension></extensions>',
+          'extensions.xml',
+        ),
+      ).toBeNull();
+    });
+
+    it('extracts extensions without a namespace declaration', () => {
+      const res = extractExtensions(
+        codeBlock`
+          <extensions>
+            <extension>
+              <groupId>fr.jcgay.maven</groupId>
+              <artifactId>maven-profiler</artifactId>
+              <version>3.3</version>
+            </extension>
+          </extensions>
+        `,
+        'extensions.xml',
+      );
+      expect(res).toMatchObject({
+        packageFile: 'extensions.xml',
+        deps: [
+          {
+            datasource: 'maven',
+            depName: 'fr.jcgay.maven:maven-profiler',
+            currentValue: '3.3',
+            depType: 'build',
+          },
+        ],
+      });
+    });
+  });
+
+  describe('extractSite', () => {
+    it('returns null for empty or invalid input', () => {
+      expect(extractSite('', 'site.xml')).toBeNull();
+      expect(extractSite('invalid xml content', 'site.xml')).toBeNull();
+      expect(extractSite('<foobar></foobar>', 'site.xml')).toBeNull();
+    });
+
+    it('returns null for site with an unsupported namespace', () => {
+      expect(
+        extractSite(
+          '<site xmlns="http://example.com/unknown/1.0.0"></site>',
+          'site.xml',
+        ),
+      ).toBeNull();
+    });
+
+    it('extracts skin dependency from site.xml', () => {
+      const res = extractSite(Fixtures.get('site.xml'), 'src/site/site.xml');
+      expect(res).toMatchObject({
+        packageFile: 'src/site/site.xml',
+        deps: [
+          {
+            datasource: 'maven',
+            depName: 'org.apache.maven.skins:maven-fluido-skin',
+            currentValue: '2.1.0',
+            depType: 'build',
+          },
+        ],
+      });
+    });
+
+    it('extracts skin dependency from site.xml without namespace', () => {
+      const res = extractSite(
+        codeBlock`
+          <site>
+            <skin>
+              <groupId>org.apache.maven.skins</groupId>
+              <artifactId>maven-default-skin</artifactId>
+              <version>1.3</version>
+            </skin>
+          </site>
+        `,
+        'site.xml',
+      );
+      expect(res).toMatchObject({
+        packageFile: 'site.xml',
+        deps: [
+          {
+            datasource: 'maven',
+            depName: 'org.apache.maven.skins:maven-default-skin',
+            currentValue: '1.3',
+            depType: 'build',
+          },
+        ],
+      });
+    });
   });
 
   describe('extractAllPackageFiles', () => {
@@ -914,6 +1008,52 @@ describe('modules/manager/maven/extract', () => {
       ]);
     });
 
+    it('should extract from extensions.xml without namespace', async () => {
+      fs.readLocalFile.mockResolvedValueOnce(codeBlock`
+        <extensions>
+          <extension>
+            <groupId>fr.jcgay.maven</groupId>
+            <artifactId>maven-profiler</artifactId>
+            <version>3.3</version>
+          </extension>
+        </extensions>
+      `);
+      const res = await extractAllPackageFiles({}, ['extensions.xml']);
+      expect(res).toMatchObject([
+        {
+          packageFile: 'extensions.xml',
+          deps: [
+            {
+              datasource: 'maven',
+              depName: 'fr.jcgay.maven:maven-profiler',
+              currentValue: '3.3',
+              depType: 'build',
+              registryUrls: ['https://repo.maven.apache.org/maven2'],
+            },
+          ],
+        },
+      ]);
+    });
+
+    it('should extract from site.xml file', async () => {
+      fs.readLocalFile.mockResolvedValueOnce(Fixtures.get('site.xml'));
+      const res = await extractAllPackageFiles({}, ['src/site/site.xml']);
+      expect(res).toMatchObject([
+        {
+          packageFile: 'src/site/site.xml',
+          deps: [
+            {
+              datasource: 'maven',
+              depName: 'org.apache.maven.skins:maven-fluido-skin',
+              currentValue: '2.1.0',
+              depType: 'build',
+              registryUrls: ['https://repo.maven.apache.org/maven2'],
+            },
+          ],
+        },
+      ]);
+    });
+
     it('should return empty array if extensions file is invalid or empty', async () => {
       fs.readLocalFile
         .mockResolvedValueOnce('')
@@ -923,6 +1063,15 @@ describe('modules/manager/maven/extract', () => {
           '.mvn/extensions.xml',
           'grp/.mvn/extensions.xml',
         ]),
+      ).toBeEmptyArray();
+    });
+
+    it('should return empty array if site.xml file is invalid or empty', async () => {
+      fs.readLocalFile
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('invalid xml content');
+      expect(
+        await extractAllPackageFiles({}, ['site.xml', 'src/site/site.xml']),
       ).toBeEmptyArray();
     });
 
