@@ -34,6 +34,8 @@ const supportedExtensionsNamespaces = [
   'http://maven.apache.org/EXTENSIONS/1.2.0',
 ];
 
+const supportedSiteNamespaces = ['http://maven.apache.org/SITE/2.0.0'];
+
 function parsePom(raw: string, packageFile: string): XmlDocument | null {
   let project: XmlDocument;
   try {
@@ -75,13 +77,31 @@ function parseExtensions(raw: string, packageFile: string): XmlDocument | null {
   if (name !== 'extensions') {
     return null;
   }
-  if (!supportedExtensionsNamespaces.includes(attr.xmlns)) {
+  if (attr.xmlns && !supportedExtensionsNamespaces.includes(attr.xmlns)) {
     return null;
   }
   if (!isNonEmptyArray(children)) {
     return null;
   }
   return extensions;
+}
+
+function parseSite(raw: string, packageFile: string): XmlDocument | null {
+  let site: XmlDocument;
+  try {
+    site = new XmlDocument(raw);
+  } catch {
+    logger.debug({ packageFile }, `Failed to parse as XML`);
+    return null;
+  }
+  const { name, attr } = site;
+  if (name !== 'site') {
+    return null;
+  }
+  if (attr.xmlns && !supportedSiteNamespaces.includes(attr.xmlns)) {
+    return null;
+  }
+  return site;
 }
 
 function containsPlaceholder(str: string | null | undefined): boolean {
@@ -194,6 +214,7 @@ function depFromNode(
     switch (node.name) {
       case 'plugin':
       case 'extension':
+      case 'skin':
         depType = 'build';
         break;
       case 'parent':
@@ -636,6 +657,30 @@ export function extractExtensions(
   return result;
 }
 
+export function extractSite(
+  rawContent: string,
+  packageFile: string,
+): PackageFile | null {
+  if (!rawContent) {
+    return null;
+  }
+
+  const site = parseSite(rawContent, packageFile);
+  if (!site) {
+    return null;
+  }
+
+  const result: MavenInterimPackageFile = {
+    datasource: MavenDatasource.id,
+    packageFile,
+    deps: [],
+  };
+
+  result.deps = deepExtract(site);
+
+  return result;
+}
+
 export async function extractAllPackageFiles(
   config: ExtractConfig,
   packageFiles: string[],
@@ -658,7 +703,14 @@ export async function extractAllPackageFiles(
         );
         additionalRegistryUrls.push(...registries);
       }
-    } else if (packageFile.endsWith('.mvn/extensions.xml')) {
+    } else if (packageFile.endsWith('site.xml')) {
+      const site = extractSite(content, packageFile);
+      if (site) {
+        packages.push(site);
+      } else {
+        logger.trace({ packageFile }, 'can not read site');
+      }
+    } else if (packageFile.endsWith('extensions.xml')) {
       const extensions = extractExtensions(content, packageFile);
       if (extensions) {
         packages.push(extensions);
